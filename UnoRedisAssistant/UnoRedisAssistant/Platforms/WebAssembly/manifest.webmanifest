@@ -1,0 +1,10 @@
+{
+  "background_color": "#ffffff",
+  "description": "UnoRedisAssistant",
+  "display": "standalone",
+  "name": "UnoRedisAssistant",
+  "short_name": "UnoRedisAssistant",
+  "start_url": "/index.html",
+  "theme_color": "#ffffff",
+  "scope": "/"
+}
