@@ -5,8 +5,12 @@ namespace UnoRedisAssistant.Services;
 
 public class RedisService : IDisposable
 {
+    private const int DefaultMaxListItems = 100;
+    private const int DefaultKeyPageSize = 100;
+    
     private ConnectionMultiplexer? _connection;
     private IDatabase? _database;
+    private IServer? _server;
     
     public bool IsConnected => _connection?.IsConnected ?? false;
     
@@ -28,6 +32,7 @@ public class RedisService : IDisposable
             
             _connection = await ConnectionMultiplexer.ConnectAsync(configOptions);
             _database = _connection.GetDatabase(connection.Database);
+            _server = _connection.GetServer(_connection.GetEndPoints().First());
             return true;
         }
         catch
@@ -41,18 +46,19 @@ public class RedisService : IDisposable
         _connection?.Close();
         _connection = null;
         _database = null;
+        _server = null;
     }
     
-    public async Task<List<string>> GetKeysAsync(string pattern = "*", int count = 100)
+    public async Task<List<string>> GetKeysAsync(string pattern = "*", int count = DefaultKeyPageSize)
     {
-        if (_connection == null || _database == null) return new List<string>();
+        if (_server == null || _database == null) return new List<string>();
         
         var keys = new List<string>();
-        var server = _connection.GetServer(_connection.GetEndPoints().First());
         
-        await foreach (var key in server.KeysAsync(_database.Database, pattern, count))
+        await foreach (var key in _server.KeysAsync(_database.Database, pattern, count))
         {
             keys.Add(key.ToString());
+            if (keys.Count >= count) break;
         }
         
         return keys;
@@ -78,16 +84,16 @@ public class RedisService : IDisposable
                 keyInfo.Value = await _database.StringGetAsync(key);
                 break;
             case RedisType.List:
-                var list = await _database.ListRangeAsync(key, 0, 99);
+                var list = await _database.ListRangeAsync(key, 0, DefaultMaxListItems - 1);
                 keyInfo.Value = string.Join("\n", list.Select(x => x.ToString()));
                 break;
             case RedisType.Set:
                 var set = await _database.SetMembersAsync(key);
-                keyInfo.Value = string.Join("\n", set.Select(x => x.ToString()));
+                keyInfo.Value = string.Join("\n", set.Take(DefaultMaxListItems).Select(x => x.ToString()));
                 break;
             case RedisType.Hash:
                 var hash = await _database.HashGetAllAsync(key);
-                keyInfo.Value = string.Join("\n", hash.Select(x => $"{x.Name}: {x.Value}"));
+                keyInfo.Value = string.Join("\n", hash.Take(DefaultMaxListItems).Select(x => $"{x.Name}: {x.Value}"));
                 break;
             default:
                 keyInfo.Value = $"Type: {type}";
@@ -105,10 +111,9 @@ public class RedisService : IDisposable
     
     public async Task<Dictionary<string, string>> GetServerInfoAsync()
     {
-        if (_connection == null) return new Dictionary<string, string>();
+        if (_server == null) return new Dictionary<string, string>();
         
-        var server = _connection.GetServer(_connection.GetEndPoints().First());
-        var info = await server.InfoAsync();
+        var info = await _server.InfoAsync();
         
         var result = new Dictionary<string, string>();
         foreach (var section in info)
